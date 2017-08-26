@@ -1,47 +1,37 @@
 #!/usr/bin/env Rscript
-
 ## Generate QTL data
+argv <- commandArgs(trailingOnly = TRUE)
+
+if(length(argv) < 4) {
+    q()
+}
+
+chr <- as.integer(argv[1])              # e.g., 21
+meth.pos <- eval(parse(text = argv[2])) # e.g., 1:50
+n.top.y0 <- as.integer(argv[3])         # e.g., 2
+out.hdr <- argv[4]                      # e.g., 'temp'
+
+cis.dist <- 1e6
 
 library(fqtl)
 library(feather)
 library(dplyr)
+source('util.R')
 options(stringsAsFactors = FALSE)
 
-meth.pos <- 1:50
-chr <- 21
-n.top.y0 <- 2
+dir.create(dirname(out.hdr), recursive = TRUE, showWarnings = FALSE)
 
-log.msg <- function(...) {
-    cat(sprintf(...), file = stderr())
-}
-
-`%&&%` <- function(a, b) paste(a, b, sep = '')
-
-`%c%` <- function(a, b) a[, b, drop = FALSE]
-
-`%r%` <- function(a, b) a[b, , drop = FALSE]
-
+################################################################
 read.meth.chr <- function(chr, ...) {
     in.file <- 'data/meth/chr' %&&% chr %&&% '-logit.ft'
     ret <- read_feather(in.file, ...)
 }
 
-.NA <- function(nrow, ncol) {
-    matrix(NA, nrow, ncol)
-}
-
-fast.cov <- function(x, y) {
-    n.obs <- crossprod(!is.na(x), !is.na(y))
-    ret <- crossprod(replace(x, is.na(x), 0),
-                     replace(y, is.na(y), 0)) / n.obs
-}
-
-fast.cor <- function(x, y) {
-    x.sd <- apply(x, 2, sd, na.rm = TRUE)
-    y.sd <- apply(y, 2, sd, na.rm = TRUE)
-    ret <- fast.cov(x, y)
-    ret <- sweep(sweep(ret, 1, x.sd, `/`), 2, y.sd, `/`)    
-}
+y1.out.file <- out.hdr %&&% '.y1.ft'
+y0.out.file <- out.hdr %&&% '.y0.ft'
+x.out.file <- out.hdr %&&% '.x.ft'
+x.bim.out.file <- out.hdr %&&% '.x.bim.ft'
+probe.out.file <- out.hdr %&&% '.y.prb.ft'
 
 ################################################################
 ## Find correlated CpGs in other chromosomes
@@ -77,8 +67,8 @@ y0.idx <- apply(abs.cov.y10, 2, function(x) order(x, decreasing=TRUE)[1:n.top.y0
 Y0.ref <- do.call(cbind, lapply(1:ncol(y0.idx), function(j) Y0 %c% y0.idx[, j]))
 
 ################################################################
-Y1 <- as.matrix(Y1 %r% sample.info$meth.pos)
-Y0 <- as.matrix(Y0.ref %r% sample.info$meth.pos)
+Y1 <- Y1 %r% sample.info$meth.pos %>% as.data.frame()
+Y0 <- Y0.ref %r% sample.info$meth.pos %>% as.data.frame()
 
 probes <- read.table('data/raw/chr' %&&% chr %&&% '-probes.txt.gz') %r% meth.pos
 
@@ -87,8 +77,6 @@ geno.bim <- read_feather('data/geno/chr' %&&% chr %&&% '.geno.bim.ft')
 colnames(geno.bim) <- c('chr', 'rs', '.', 'snp.pos', 'a1', 'a2')
 
 ## Take SNPs in cis-regulatory region
-cis.dist <- 1e6
-
 colnames(probes) <- c('cg', 'chr', 'cg.pos', '.')
 
 snp.idx.str <- function(cg.pos) {
@@ -96,7 +84,6 @@ snp.idx.str <- function(cg.pos) {
                      geno.bim$snp.pos < cg.pos + cis.dist)
     paste(ret, collapse = '|')
 }
-
 
 temp <- probes %>% group_by(cg) %>% mutate(geno.rows = snp.idx.str(cg.pos)) %>%
     mutate(geno.rows = sapply(geno.rows, strsplit, split = '[|]'))
@@ -111,3 +98,13 @@ X <- read_feather(x.file, 'V' %&&% geno.rows) %r%
 x.bim <- geno.bim %r% geno.rows %>%
     as.data.frame()
 
+colnames(X) <- x.bim[geno.rows, 'rs']
+colnames(Y1) <- probes[, 'cg']
+
+################################################################
+## Write them down
+write_feather(Y1, path = y1.out.file)
+write_feather(Y0, path = y0.out.file)
+write_feather(X, path = x.out.file)
+write_feather(x.bim, path = x.bim.out.file)
+write_feather(probes, path = probe.out.file)
