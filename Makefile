@@ -85,7 +85,7 @@ $(TEMPDIR):
 jobs/qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-data-$(chr)-jobs.txt.gz)
 	cat $^ > $@
 	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=8g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
-
+	rm $^
 
 CHUNK := 20 # group every ~20 CpGs as one job
 CTRL := 5   # control CpGs for each CpG
@@ -105,6 +105,7 @@ clear-step4:
 jobs/qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-run-$(chr)-jobs.txt.gz)
 	cat $^ > $@
 	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	rm $^
 
 jobs/temp-qtl-run-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -113,7 +114,8 @@ jobs/temp-qtl-run-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
 jobs/qtl-perm-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-perm-$(chr)-jobs.txt.gz)
 	cat $^ > $@
 	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	rm $^
 
 jobs/temp-qtl-perm-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./run.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS ("result/qtl/chr$*/b" NR "/qtl") FS "TRUE" }' | gzip > $@
+	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./run.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS ("result/perm/chr$*/b" NR "/perm") FS "TRUE" }' | gzip > $@
