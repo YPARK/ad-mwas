@@ -104,7 +104,7 @@ clear-step4:
 
 jobs/qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-run-$(chr)-jobs.txt.gz)
 	cat $^ > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.run -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
 jobs/temp-qtl-run-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
@@ -113,7 +113,7 @@ jobs/temp-qtl-run-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
 
 jobs/qtl-perm-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-perm-$(chr)-jobs.txt.gz)
 	cat $^ > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.perm -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
 jobs/temp-qtl-perm-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
