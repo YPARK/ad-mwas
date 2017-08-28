@@ -7,7 +7,7 @@ if(length(argv) < 4) {
 }
 
 chr <- as.integer(argv[1])              # e.g., 21
-meth.pos <- eval(parse(text = argv[2])) # e.g., 1:50
+meth.cols <- eval(parse(text = argv[2])) # e.g., 1:50
 n.top.y0 <- as.integer(argv[3])         # e.g., 2
 out.hdr <- argv[4]                      # e.g., 'temp'
 
@@ -36,7 +36,7 @@ probe.out.file <- out.hdr %&&% '.y.prb.ft'
 ################################################################
 ## Find correlated CpGs in other chromosomes
 
-Y1 <- as.matrix(read.meth.chr(chr, columns = 'X' %&&% meth.pos))
+Y1 <- as.matrix(read.meth.chr(chr, columns = 'X' %&&% meth.cols))
 
 sample.info <- read_feather('data/geno/chr' %&&% chr %&&% '.samples.ft')
 
@@ -45,12 +45,12 @@ take.y0 <- function(.chr, y1, n.top) {
 
     log.msg('correlation between y1 and y0 in chr%d\n', .chr)
 
-    abs.cov.mat <- t(abs(fast.cov(y1, y0)))
-    y0.idx <- apply(abs.cov.mat, 2, function(x) order(x, decreasing = TRUE)[1:n.top])
+    abs.cor.mat <- t(abs(fast.cor(y1, y0)))
+    y0.idx <- apply(abs.cor.mat, 2, function(x) order(x, decreasing = TRUE)[1:n.top])
     y0.idx <- unique(as.vector(y0.idx))
 
     ret <- y0[, y0.idx, drop = FALSE]
-    rm(y0); rm(abs.cov.mat); rm(y0)
+    rm(y0); rm(abs.cor.mat); rm(y0)
     log.msg('constructed y0 in chr%d\n', .chr)
 
     return(ret)
@@ -70,7 +70,7 @@ Y0.ref <- do.call(cbind, lapply(1:ncol(y0.idx), function(j) Y0 %c% y0.idx[, j]))
 Y1 <- Y1 %r% sample.info$meth.pos %>% as.data.frame()
 Y0 <- Y0.ref %r% sample.info$meth.pos %>% as.data.frame()
 
-probes <- read.table('data/raw/chr' %&&% chr %&&% '-probes.txt.gz') %r% meth.pos
+probes <- read.table('data/raw/chr' %&&% chr %&&% '-probes.txt.gz') %r% meth.cols
 
 geno.bim <- read_feather('data/geno/chr' %&&% chr %&&% '.geno.bim.ft')
 
@@ -80,8 +80,8 @@ colnames(geno.bim) <- c('chr', 'rs', '.', 'snp.pos', 'a1', 'a2')
 colnames(probes) <- c('cg', 'chr', 'cg.pos', '.')
 
 snp.idx.str <- function(cg.pos) {
-    ret <- which(geno.bim$snp.pos > cg.pos - cis.dist &
-                     geno.bim$snp.pos < cg.pos + cis.dist)
+    ret <- which(geno.bim$snp.pos > (cg.pos - cis.dist) &
+                     geno.bim$snp.pos < (cg.pos + cis.dist))
     paste(ret, collapse = '|')
 }
 
@@ -91,14 +91,14 @@ temp <- probes %>% group_by(cg) %>% mutate(geno.rows = snp.idx.str(cg.pos)) %>%
 geno.rows <- as.integer(unique(unlist(temp$geno.rows)))
 
 x.file <- 'data/geno/chr' %&&% chr %&&% '.geno.mat.ft'
-X <- read_feather(x.file, 'V' %&&% geno.rows) %r% 
-    sample.info$geno.pos %>%
+
+X <- read_feather(x.file, 'V' %&&% geno.rows) %>%
         as.data.frame()
 
 x.bim <- geno.bim %r% geno.rows %>%
     as.data.frame()
 
-colnames(X) <- x.bim[geno.rows, 'rs']
+colnames(X) <- x.bim[, 'rs']
 colnames(Y1) <- probes[, 'cg']
 
 ################################################################
