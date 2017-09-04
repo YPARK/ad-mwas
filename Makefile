@@ -6,7 +6,9 @@ RAW := /broad/compbio/eaton/dnam_data/full_data/FinalReport_all_fields_768.txt.g
 IDs := /broad/compbio/eaton/dnam_data/full_data/master_ids.FromLori20121102.csv.xz
 PHENO := phenotype/pheno_cov_n3033_032315.csv
 GENO := genotype/step08/BED
-CPROBE := /broad/compbio/eaton/dnam_data/full_data/DLPFC_450KMethy_FinalDataSet_8.2.11/Control Probe Profile.txt
+CPROBE := /broad/compbio/eaton/dnam_data/full_data/DLPFC_450KMethy_FinalDataSet_8.2.11/Control\ Probe\ Profile.txt.xz
+
+PLINKZIP := https://www.cog-genomics.org/static/bin/plink170815/plink_linux_x86_64.zip
 
 CHR := $(shell seq 1 22)
 
@@ -29,9 +31,8 @@ step2: data/raw/all-probes.txt.gz \
  data/raw/matched.samples.txt.gz \
  data/meth/control.ft \
  $(foreach chr, $(CHR), data/raw/chr$(chr)-probes.txt.gz) \
- $(foreach chr, $(CHR), data/raw/chr$(chr)-data.txt.gz) \
- $(foreach chr, $(CHR), data/meth/chr$(chr)-logit.ft) \
- $(foreach chr, $(CHR), data/geno/chr$(chr).geno.mat.ft)
+ $(foreach chr, $(CHR), data/raw/chr$(chr)-beta.txt.gz) \
+ $(foreach chr, $(CHR), data/meth/chr$(chr)-logit.ft)
 
 data/raw/all-probes.txt.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -43,7 +44,7 @@ data/raw/chr%-probes.txt.gz: data/raw/all-probes.txt.gz data/probes/chr%-probes.
 
 data/raw/samples.txt:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	zcat $(RAW) | head -n1 | tr '\t' '\n' | awk '/AVG_Beta/ { gsub(/.AVG_Beta/,""); print }' > $@
+	zcat $(RAW) | head -n1 | tr '\t' '\n' | awk -F'\t' '/AVG_Beta/ { gsub(/.AVG_Beta/,""); print $$0 FS (++id) FS NR }' > $@
 
 data/raw/masterid.csv:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -53,15 +54,15 @@ data/raw/matched.samples.txt.gz: data/raw/samples.txt data/raw/masterid.csv
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	./make.matched.samples.R $^ $@
 
-data/raw/chr%-data.txt.gz: data/raw/chr%-probes.txt.gz
+data/raw/chr%-beta.txt.gz: data/raw/chr%-probes.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	zcat $< | awk 'NR > 1 { printf "," } { printf $$NF }' > data/raw/temp-chr$*.rows
 	zcat $(RAW) | awk -F'\t' -vROWSF=data/raw/temp-chr$*.rows -f util_subset_final_report.awk | awk -F'\t' -f util_transpose.awk | gzip -c > $@
 	rm data/raw/temp-chr$*.rows
 
 ## control probes
-data/raw/control-probes.txt.gz: # this is ugly
-	cat "$(CPROBE)" | gzip > $@
+data/raw/control-probes.txt.gz:
+	cat $(CPROBE) | xz -d | gzip > $@
 
 data/meth/control.ft: data/raw/matched.samples.txt.gz data/raw/control-probes.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -69,26 +70,18 @@ data/meth/control.ft: data/raw/matched.samples.txt.gz data/raw/control-probes.tx
 
 
 ## feather file for faster access
-data/meth/chr%-logit.ft: data/meth/chr%-data.ft
+data/meth/chr%-logit.ft: data/raw/chr%-probes.txt.gz data/raw/chr%-beta.txt.gz data/raw/samples.txt
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./util.take.logit.R $< $@
-
-data/meth/chr%-data.ft: data/raw/chr%-data.txt.gz
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./util.txt2feather.R $< $@
-
-data/geno/chr%.geno.mat.ft: data/raw/matched.samples.txt.gz $(PHENO)
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./util.plink2feather.R genotype/step08/BED/chr$* $^ data/geno/chr$*
+	./util.take.logit.R $^ $@
 
 ################################################################
 ## Generate QTL data in temporary directory
-step3: jobs/qtl-data-jobs.txt.gz
+step3: bin/plink jobs/qtl-data-jobs.txt.gz
 
 clear-step3:
 	[ -f jobs/qtl-data-jobs.txt.gz ] && rm jobs/qtl-data-jobs.txt.gz
 
-TEMPDIR := /broad/hptmp/ypp/AD/mwas/
+TEMPDIR := /broad/hptmp/ypp/AD/mwas/qtl/
 
 $(TEMPDIR):
 	[ -d $@ ] || mkdir -p $@
@@ -100,7 +93,7 @@ jobs/qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-data-$(chr)-jobs
 	rm $^
 
 CHUNK := 20 # group every ~20 CpGs as one job
-CTRL := 5   # control CpGs for each CpG
+CTRL := 3   # control CpGs for each CpG
 jobs/temp-qtl-data-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz $(TEMPDIR)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./data.qtl.R" FS $* FS $$1 FS $(CTRL) FS ("$(TEMPDIR)/$*/" NR "-data") }' | gzip > $@
@@ -108,7 +101,7 @@ jobs/temp-qtl-data-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz $(TEMPDIR)
 
 ################################################################
 ## Confounder correction and QTL calling
-step4: jobs/qtl-run-jobs.txt.gz jobs/qtl-perm-jobs.txt.gz
+step4: jobs/qtl-run-jobs.txt.gz
 
 clear-step4:
 	[ -f jobs/qtl-run-jobs.txt.gz ] && rm jobs/qtl-run-jobs.txt.gz
@@ -120,4 +113,13 @@ jobs/qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-run-$(chr)-jobs.t
 
 jobs/temp-qtl-run-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./run.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS "data/geno/chr$*.samples.ft" FS data/meth/control.ft FS ("result/qtl/chr$*/b" NR) }' | gzip > $@
+	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./run.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS "data/geno/chr$*.samples.ft" FS "data/meth/control.ft" FS ("result/qtl/chr$*/b" NR) }' | gzip > $@
+
+################################################################
+## Utilities
+
+bin/plink:
+	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	curl $(PLINKZIP) -o bin/plink.zip
+	unzip bin/plink.zip -d bin/
+

@@ -2,11 +2,14 @@
 
 argv <- commandArgs(trailingOnly = TRUE)
 
-if(length(argv) < 2) q()
+if(length(argv) < 4) q()
 
-in.file <- argv[1]
-out.file <- argv[2]
+probe.file <- argv[1]
+data.file <- argv[2]
+sample.file <- argv[3]
+out.file <- argv[4]
 
+library(readr)
 library(feather)
 
 log.msg <- function(...) {
@@ -22,8 +25,15 @@ logit.std <- function(x, lb = -4, ub = 4) {
     ret <- pmax(pmin(ret, ub), lb)
 }
 
-Y <- read_feather(in.file)
+
+probes <- read.table(probe.file, sep='\t', col.names=c('cg', 'chr', 'loc', 'meth.pos'))
+samples <- read.table(sample.file, sep='\t', col.names=c('subj.id', 'meth.pos', 'data.pos'))
+in.data <- scan(data.file, sep = '\t')
+stopifnot((nrow(probes) * nrow(samples)) == length(in.data))
+
+Y <- matrix(data = in.data, ncol = nrow(probes), byrow = TRUE)
+rm(in.data)
+
 out <- logit.std(Y, lb = -4, ub = 4)
 write_feather(as.data.frame(out), path = out.file)
 log.msg('Read Y: %d x %d\n', nrow(Y), ncol(Y))
-

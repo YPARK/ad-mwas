@@ -10,8 +10,8 @@ library(reshape2)
 library(feather)
 options(stringsAsFactors = FALSE)
 
-matched.sample.file <- argv[1] # e.g., 'data/raw/matched.samples.txt.gz'
-ctrl.file <- argv[2] # e.g., 'data/raw/control-probes.txt.gz'
+matched.sample.file <- argv[1] # e.g., matched.sample.file = 'data/raw/matched.samples.txt.gz'
+ctrl.file <- argv[2] # e.g., ctrl.file = 'data/raw/control-probes.txt.gz'
 out.file <- argv[3] # e.g., out.ft
 
 ctrl.raw.tab <- read.table(ctrl.file, header = TRUE, sep = '\t', check.names = FALSE)
