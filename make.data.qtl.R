@@ -46,6 +46,8 @@ probes <- probes %r% meth.cols
 chr <- unique(probes$chr)
 samples <- read.table(sample.file, sep='\t', col.names=c('iid', 'meth.id', 'meth.pos', 'has.geno', 'has.meth'))
 
+log.msg('probes:\n%s\n\n', paste(probes$cg, collapse=', '))
+
 pheno.tab <- read.table(pheno.file, sep = ',', header = TRUE) %>% rename(fid = FID, iid = IID)
 pheno.tab[pheno.tab == -9] <- NA
 pheno.tab <- pheno.tab %>% select(-fid)
@@ -53,20 +55,20 @@ pheno.tab <- pheno.tab %>% select(-fid)
 plink.lb <- max(min(probes$loc) - cis.dist, 0)
 plink.ub <- max(probes$loc) + cis.dist
 
-plink.cmd <- sprintf('./bin/plink --bfile %s --make-bed --geno 0.05 --chr %d --from-bp %d --to-bp %d --out %s',
-                     plink.hdr, chr, plink.lb, plink.ub, temp.dir %&&% 'plink')
+plink.cmd <- sprintf('./bin/plink --bfile %s --make-bed --geno 0.05 --maf 0.05 --chr %d --from-bp %d --to-bp %d --out %s',
+                     plink.hdr, chr, plink.lb, plink.ub, temp.dir %&&% '/plink')
 system(plink.cmd)
-plink <- read.plink(temp.dir %&&% 'plink')
-system('rm -r ' %&&% temp.dir)
+plink <- read.plink(temp.dir %&&% '/plink')
+
 colnames(plink$FAM) <- c('fid', 'iid', '.', '..', 'msex', '...')
 fam.tab <- data.frame(plink$FAM %>% select(fid, iid, msex), geno.pos = 1:nrow(plink$FAM))
-
-log.msg('probes:\n%s\n\n', paste(probes$cg, collapse=', '))
 
 if(nrow(plink$BIM) < 1) {
     log.msg('No variants in cis\n\n')
     q()
 }
+
+log.msg('Read genotypes\n\n')
 
 Y1 <- as.matrix(read_feather(meth.file, columns = 'V' %&&% meth.cols))
 colnames(Y1) <- probes$cg
@@ -109,7 +111,7 @@ Y1 <- Y1 %r% sample.info$meth.pos %>% as.data.frame()
 Y0 <- Y0.ref %r% sample.info$meth.pos %>% as.data.frame()
 
 x.bim <- plink$BIM
-X <- plink$BED %r% sample.info$geno.pos %>% as.data.frame()
+X <- plink$BED %r% sample.info$geno.pos %>% scale() %>% as.data.frame()
 colnames(X) <- x.bim[, 2]
 
 ctrl.out <- sample.info %>% select(iid) %>%
@@ -125,3 +127,7 @@ write_feather(Y0, path = y0.out.file)
 write_feather(X, path = x.out.file)
 write_feather(x.bim, path = x.bim.out.file)
 write_feather(probes, path = probe.out.file)
+
+system('rm -r ' %&&% temp.dir)
+log.msg('Successfully generated data\n')
+

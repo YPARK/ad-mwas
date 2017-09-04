@@ -89,14 +89,25 @@ $(TEMPDIR):
 ## Create methylation job lists
 jobs/qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-data-$(chr)-jobs.txt.gz)
 	cat $^ > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=8g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
-CHUNK := 20 # group every ~20 CpGs as one job
-CTRL := 3   # control CpGs for each CpG
-jobs/temp-qtl-data-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz $(TEMPDIR)
+CHUNK := 30 # group every ~30 CpGs as one job
+NCTRL := 3   # 3 control CpGs for each CpG
+DATA_QTL := ./make.data.qtl.R
+GENO_HDR := ./rosmap-geno/gen/impute/rosmap1709-chr
+
+## % = $(chr)
+jobs/temp-qtl-data-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz data/meth/chr%-logit.ft $(TEMPDIR)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./data.qtl.R" FS $* FS $$1 FS $(CTRL) FS ("$(TEMPDIR)/$*/" NR "-data") }' | gzip > $@
+	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "$(DATA_QTL)" FS "data/meth/chr$*-logit.ft" FS "data/raw/chr$*-probes.txt.gz" FS $$1 FS $(NCTRL) FS "$(GENO_HDR)$*" FS ("$(TEMPDIR)/$*/" NR "-data") }' | gzip > $@
+
+
+## TODO: construct PCs
+
+## TODO: construct ICs
+
+
 
 
 ################################################################
