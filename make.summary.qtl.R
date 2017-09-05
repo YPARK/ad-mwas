@@ -102,7 +102,7 @@ estimate.confounder <- function(yy, yy.ctrl, xx,
                    gammax = 1e4,
                    out.residual = TRUE,
                    tol = 1e-8,
-                   rate = 1e-2,
+                   rate = 5e-3,
                    pi.ub = -0,
                    pi.lb = -4,
                    model = 'gaussian',
@@ -152,6 +152,11 @@ conf.1 <- estimate.confounder(Y1, Y0, X, clean.confounder = TRUE)
 conf.2 <- estimate.confounder(Y1, Y0, X, clean.confounder = FALSE)
 conf.3 <- estimate.confounder(Y1, C, X, clean.confounder = FALSE)
 conf.4 <- estimate.confounder(Y1, PC, X, clean.confounder = FALSE)
+
+write.confounder(conf.1, out.hdr %&&% '.conf-y0-clean')
+write.confounder(conf.2, out.hdr %&&% '.conf-y0')
+write.confounder(conf.3, out.hdr %&&% '.conf-ctrl')
+write.confounder(conf.4, out.hdr %&&% '.conf-pc')
 
 qtl.0 <- get.marginal.qtl(X, Y1)
 qtl.1 <- get.marginal.qtl(X, conf.1$R)
