@@ -32,7 +32,8 @@ step2: data/raw/all-probes.txt.gz \
  data/meth/control.ft \
  $(foreach chr, $(CHR), data/raw/chr$(chr)-probes.txt.gz) \
  $(foreach chr, $(CHR), data/raw/chr$(chr)-beta.txt.gz) \
- $(foreach chr, $(CHR), data/meth/chr$(chr)-logit.ft)
+ $(foreach chr, $(CHR), data/meth/chr$(chr)-logit.ft) \
+ data/meth/PC.txt.gz
 
 data/raw/all-probes.txt.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -68,6 +69,9 @@ data/meth/control.ft: data/raw/matched.samples.txt.gz data/raw/control-probes.tx
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	./make.matched.control.R $^ $@
 
+## PCs of most variable CpG probes
+data/meth/PC.txt.gz: data/raw/matched.samples.txt.gz $(foreach chr, $(CHR), data/raw/chr$(chr)-beta.txt.gz) $(foreach chr, $(CHR), data/meth/chr$(chr)-logit.ft)
+	./make.meth.pc.R
 
 ## feather file for faster access
 data/meth/chr%-logit.ft: data/raw/chr%-probes.txt.gz data/raw/chr%-beta.txt.gz data/raw/samples.txt
@@ -101,14 +105,6 @@ GENO_HDR := ./rosmap-geno/gen/impute/rosmap1709-chr
 jobs/temp-qtl-data-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz data/meth/chr%-logit.ft $(TEMPDIR)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "$(DATA_QTL)" FS "data/meth/chr$*-logit.ft" FS "data/raw/chr$*-probes.txt.gz" FS $$1 FS $(NCTRL) FS "$(GENO_HDR)$*" FS ("$(TEMPDIR)/$*/" NR "-data") }' | gzip > $@
-
-
-## TODO: construct PCs
-
-## TODO: construct ICs
-
-
-
 
 ################################################################
 ## Confounder correction and QTL calling

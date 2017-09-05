@@ -4,7 +4,7 @@ argv <- commandArgs(trailingOnly = TRUE)
 
 if(length(argv) < 2) q()
 
-data.hdr <- argv[1] # e.g., data.hdr = '/broad/hptmp/ypp/AD/mwas/qtl/19/13-data'
+data.hdr <- argv[1] # e.g., data.hdr = '/broad/hptmp/ypp/AD/mwas/qtl/19/2-data'
 out.hdr <- argv[2]  # e.g., out.hdr = 'temp'
 
 dir.create(dirname(out.hdr), recursive = TRUE, showWarnings = FALSE)
@@ -20,13 +20,16 @@ probe.data.file <- data.hdr %&&% '.y.prb.ft'
 cov.data.file <- data.hdr %&&% '.cov.ft'
 ctrl.data.file <- data.hdr %&&% '.ctrl.ft'
 
+PC.file <- 'data/meth/PC.txt.gz'
+
 in.files <- c(y1.data.file,
               y0.data.file,
               x.data.file,
               x.bim.data.file,
               probe.data.file,
               cov.data.file,
-              ctrl.data.file)
+              ctrl.data.file,
+              PC.file)
 
 if(!all(sapply(in.files, file.exists))) {
     log.msg('Insufficient input files:\n%s\n',
@@ -55,6 +58,9 @@ pheno <- V %>%
         scale() %>% as.matrix()
 
 pheno <- cbind(pheno, 1)
+
+PC <- read.table(PC.file) %>% as.matrix() %r% V$meth.pos %c% 1:30 %>%
+    scale()
 
 take.theta <- function(qtl.out) {
     if('mean.left' %in% names(qtl.out)){
@@ -93,11 +99,11 @@ estimate.confounder <- function(yy, yy.ctrl, xx,
                                 clean.confounder = FALSE) {
 
     vb.opt <- list(vbiter = ceiling(.iterations/2),
-                   gammax = 1e3,
+                   gammax = 1e4,
                    out.residual = TRUE,
                    tol = 1e-8,
                    rate = 1e-2,
-                   pi.ub = -2,
+                   pi.ub = -0,
                    pi.lb = -4,
                    model = 'gaussian',
                    k = 10)
@@ -145,11 +151,13 @@ write.tab.gz <- function(.tab, .out.file) {
 conf.1 <- estimate.confounder(Y1, Y0, X, clean.confounder = TRUE)
 conf.2 <- estimate.confounder(Y1, Y0, X, clean.confounder = FALSE)
 conf.3 <- estimate.confounder(Y1, C, X, clean.confounder = FALSE)
+conf.4 <- estimate.confounder(Y1, PC, X, clean.confounder = FALSE)
 
 qtl.0 <- get.marginal.qtl(X, Y1)
 qtl.1 <- get.marginal.qtl(X, conf.1$R)
 qtl.2 <- get.marginal.qtl(X, conf.2$R)
 qtl.3 <- get.marginal.qtl(X, conf.3$R)
+qtl.4 <- get.marginal.qtl(X, conf.4$R)
 
 x.perm <- X %r% sample(nrow(X))
 
@@ -157,17 +165,18 @@ qtl.perm.0 <- get.marginal.qtl(x.perm, Y1)
 qtl.perm.1 <- get.marginal.qtl(x.perm, conf.1$R)
 qtl.perm.2 <- get.marginal.qtl(x.perm, conf.2$R)
 qtl.perm.3 <- get.marginal.qtl(x.perm, conf.3$R)
-
+qtl.perm.4 <- get.marginal.qtl(x.perm, conf.4$R)
 
 write.tab.gz(qtl.0, out.hdr %&&% '.qtl-raw.gz')
 write.tab.gz(qtl.1, out.hdr %&&% '.qtl-y0-clean.gz')
 write.tab.gz(qtl.2, out.hdr %&&% '.qtl-y0.gz')
 write.tab.gz(qtl.3, out.hdr %&&% '.qtl-ctrl.gz')
+write.tab.gz(qtl.4, out.hdr %&&% '.qtl-pc.gz')
 
 write.tab.gz(qtl.perm.0, out.hdr %&&% '.qtl.perm-raw.gz')
 write.tab.gz(qtl.perm.1, out.hdr %&&% '.qtl.perm-y0-clean.gz')
 write.tab.gz(qtl.perm.2, out.hdr %&&% '.qtl.perm-y0.gz')
 write.tab.gz(qtl.perm.3, out.hdr %&&% '.qtl.perm-ctrl.gz')
-
+write.tab.gz(qtl.perm.4, out.hdr %&&% '.qtl.perm-pc.gz')
 
 log.msg('Finished\n')
