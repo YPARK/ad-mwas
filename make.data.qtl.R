@@ -41,7 +41,7 @@ ctrl.out.file <- out.hdr %&&% '.ctrl.ft'
 ################################################################
 ## Find correlated CpGs in other chromosomes
 
-probes <- read.table(meth.probe.file, sep='\t', col.names=c('cg', 'chr', 'loc', 'meth.pos'))
+probes <- read.table(meth.probe.file, sep='\t', col.names=c('cg', 'chr', 'loc', 'cg.pos'))
 probes <- probes %r% meth.cols
 chr <- unique(probes$chr)
 samples <- read.table(sample.file, sep='\t', col.names=c('iid', 'meth.id', 'meth.pos', 'has.geno', 'has.meth'))

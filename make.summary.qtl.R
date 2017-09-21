@@ -4,7 +4,7 @@ argv <- commandArgs(trailingOnly = TRUE)
 
 if(length(argv) < 2) q()
 
-data.hdr <- argv[1] # e.g., data.hdr = '/broad/hptmp/ypp/AD/mwas/qtl/19/2-data'
+data.hdr <- argv[1] # e.g., data.hdr = '/broad/hptmp/ypp/AD/mwas/qtl/1/4-data'
 out.hdr <- argv[2]  # e.g., out.hdr = 'temp'
 
 dir.create(dirname(out.hdr), recursive = TRUE, showWarnings = FALSE)
@@ -41,6 +41,8 @@ if(!all(sapply(in.files, file.exists))) {
 library(dplyr)
 library(feather)
 library(fqtl)
+library(glmnet)
+library(methods)
 .read.tab <- function(...) read_feather(...) %>% as.data.frame()
 .read.mat <- function(...) read_feather(...) %>% as.matrix()
 .cor <- function(...) cor(..., use = 'pairwise.complete.obs')
@@ -48,7 +50,11 @@ library(fqtl)
 Y1 <- .read.mat(y1.data.file)
 Y0 <- .read.mat(y0.data.file)
 X <- .read.mat(x.data.file)
-probes <- .read.tab(probe.data.file) %>% select(-meth.pos)
+x.bim <- .read.tab(x.bim.data.file)
+colnames(x.bim) <- c('chr', 'rs', '.', 'snp.loc', 'qtl.a1', 'qtl.a2')
+
+probes <- .read.tab(probe.data.file) %>% select(-cg.pos)
+cpg.names <- probes$cg
 
 V <- .read.tab(cov.data.file)
 C <- .read.mat(ctrl.data.file)
@@ -62,6 +68,7 @@ pheno <- cbind(pheno, 1)
 PC <- read.table(PC.file) %>% as.matrix() %r% V$meth.pos %c% 1:30 %>%
     scale()
 
+################################################################
 take.theta <- function(qtl.out) {
     if('mean.left' %in% names(qtl.out)){
         theta <- qtl.out$mean.left$theta %*% t(qtl.out$mean.right$theta)
@@ -74,72 +81,121 @@ take.theta <- function(qtl.out) {
 take.pve <- function(qtl.out, xx, cc) {
 
     theta <- take.theta(qtl.out)
+    theta.cov <- qtl.out$mean.cov$theta
     resid <- qtl.out$resid$theta
 
+    xx[is.na(xx)] <- 0
+    theta[is.na(theta)] <- 0
+    theta.cov[is.na(theta.cov)] <- 0
+    cc[is.na(cc)] <- 0
     eta.1 <- xx %*% theta
-    eta.2 <- cc %*% qtl.out$mean.cov$theta
-
-    eta.tot <- resid + eta.1 + eta.2
+    eta.2 <- cc %*% theta.cov
 
     data.frame(v1 = apply(eta.1, 2, var, na.rm = TRUE),
                v2 = apply(eta.2, 2, var, na.rm = TRUE),
                vr = apply(resid, 2, var, na.rm = TRUE))
 }
 
-##############
-## method 1 ##
-##############
-
 ## 1. W = Y0 - X * theta
 ## 2. Y1 = f(W + R)
-estimate.confounder <- function(yy, yy.ctrl, xx,
+estimate.confounder <- function(yy, yy.ctrl,
+                                xx = NULL,
+                                clean.confounder = FALSE,
+                                out.tag = '',
                                 .pheno = pheno,
-                                .probes = probes,
                                 .iterations = 5000,
-                                clean.confounder = FALSE) {
+                                .factored = TRUE,
+                                .cpg.names = cpg.names) {
 
-    vb.opt <- list(vbiter = ceiling(.iterations/2),
+    vb.opt <- list(vbiter = .iterations,
                    gammax = 1e4,
                    out.residual = TRUE,
                    tol = 1e-8,
-                   rate = 5e-3,
-                   pi.ub = -0,
-                   pi.lb = -4,
+                   rate = 0.01,
+                   decay = -0.01,
                    model = 'gaussian',
-                   k = 10)
-    
+                   pi = -0,
+                   tau = -5,
+                   do.hyper = FALSE,
+                   nsample = 10,
+                   print.interv = 100,
+                   adam.rate.m = 0.5,
+                   adam.rate.v = 0.9)
+
     if(clean.confounder) {
-        out.W <- fqtl.regress(y = yy.ctrl,
-                              x.mean = xx,
-                              c.mean = .pheno,
-                              factored = FALSE,
-                              options = vb.opt)
-        
-        W.proxy <- out.W$resid$theta %>% scale()
+        stopifnot(!is.null(xx))
+
+        out.W <- fqtl.regress(y = yy.ctrl, x.mean = xx, factored = FALSE, options = vb.opt)
+        W.proxy <- out.W$resid$theta
+        W.proxy[is.na(yy.ctrl)] <- NA
+        W.proxy <- scale(W.proxy)
     } else {
         W.proxy <- yy.ctrl %>% scale()
     }
 
-    ## Remove Y1 ~ W + .Pheno + 1    
-    out.1 <- fqtl.regress(y = yy,
-                          x.mean = W.proxy, 
-                          c.mean = .pheno,
-                          factored = TRUE,
+    k <- max(min(ncol(yy) - 1, 5), 1)
+
+    vb.opt$k <- k
+    vb.opt$svd.init <- TRUE
+
+    ## Remove Y1 ~ W + .Pheno + 1
+    out.1 <- fqtl.regress(y = yy, x.mean = W.proxy, c.mean = .pheno, factored = .factored,
                           options = vb.opt)
 
     residual <- out.1$resid$theta
     residual[is.na(yy)] <- NA
-    colnames(residual) <- .probes[, 'cg']
-    pve <- cbind(.probes, take.pve(out.1, W.proxy, pheno))
-    list(R = residual, W = W.proxy, PVE = pve,
+    colnames(residual) <- .cpg.names
+    pve <- cbind(.cpg.names, take.pve(out.1, W.proxy, .pheno))
+
+    list(R = residual,
+         W = W.proxy,
+         PVE = pve,
          mean.left = out.1$mean.left,
-         mean.right = out.1$mean.right)
+         mean.right = out.1$mean.right,
+         mean = out.1$mean,
+         var = out.1$var,
+         out.tag = out.tag)
+}
+
+run.glmnet <- function(y, x, alpha = 1){
+    valid <- !is.na(y)
+    xx <- x[valid,,drop=FALSE]
+    yy <- as.matrix(y[valid])
+    cv.out <- cv.glmnet(x=xx, y=yy, alpha=alpha, nfolds=5)
+    bet <- glmnet(x=xx, y=yy, alpha=alpha, lambda=cv.out$lambda.min)$beta
+    cat(mean(abs(bet) > 0), '\n')
+
+    resid <- matrix(NA, nrow = length(y), ncol = 1)
+    resid[valid,] <- as.matrix(yy - xx %*% bet)
+    return(list(beta = as.matrix(bet), resid = resid))
+}
+
+estimate.lm <- function(yy, yy.ctrl,
+                        out.tag = '',
+                        .pheno = pheno,
+                        .cpg.names = cpg.names) {
+
+    .pheno[is.na(.pheno)] <- 0
+    .nc <- ncol(yy.ctrl)
+    .xx <- cbind(yy.ctrl, .pheno)
+    .xx[is.na(.xx)] <- 0
+
+    glmnet.list <- apply(yy, 2, run.glmnet, x = .xx, alpha = 0.5)
+
+    out <- list()
+    out$resid$theta <- do.call(cbind, lapply(glmnet.list, function(x) x$resid))
+    out$mean$theta <- do.call(cbind, lapply(glmnet.list, function(x) x$beta %r% 1:.nc))
+    out$mean.cov$theta <- do.call(cbind, lapply(glmnet.list, function(x) x$beta %r% (-(1:.nc))))
+
+    pve <- cbind(.cpg.names, take.pve(out, as.matrix(yy.ctrl), as.matrix(.pheno)))
+    colnames(out$resid$theta) <- .cpg.names
+
+    list(R = out$resid$theta, PVE = pve, out.tag = out.tag, lm = glmnet.list)
 }
 
 write.confounder <- function(.obj, .out.hdr) {
     resid.out.file <- .out.hdr %&&% '.resid.gz'
     pve.out.file <- .out.hdr %&&% '.pve.gz'
-
     write.tab(.obj$R, file = gzfile(resid.out.file))
     write.tab(.obj$PVE, file = gzfile(pve.out.file))
 }
@@ -148,40 +204,41 @@ write.tab.gz <- function(.tab, .out.file) {
     write.tab(.tab, file = gzfile(.out.file))
 }
 
-conf.1 <- estimate.confounder(Y1, Y0, X, clean.confounder = TRUE)
-conf.2 <- estimate.confounder(Y1, Y0, X, clean.confounder = FALSE)
-conf.3 <- estimate.confounder(Y1, C, X, clean.confounder = FALSE)
-conf.4 <- estimate.confounder(Y1, PC, X, clean.confounder = FALSE)
+filter.qtl <- function(qtl.tab, cis.dist = 1e6, .probes = probes, .snps = x.bim) {
+    qtl.tab %>% mutate(cg = as.character(cg), rs = as.character(rs)) %>%
+        left_join(.probes, by = 'cg') %>%
+            left_join(.snps, by = 'rs') %>%
+                filter(abs(snp.loc - loc) < cis.dist) %>%
+                    select(snp.loc, cg, beta, beta.z)
+}
 
-write.confounder(conf.1, out.hdr %&&% '.conf-y0-clean')
-write.confounder(conf.2, out.hdr %&&% '.conf-y0')
-write.confounder(conf.3, out.hdr %&&% '.conf-ctrl')
-write.confounder(conf.4, out.hdr %&&% '.conf-pc')
 
-qtl.0 <- get.marginal.qtl(X, Y1)
-qtl.1 <- get.marginal.qtl(X, conf.1$R)
-qtl.2 <- get.marginal.qtl(X, conf.2$R)
-qtl.3 <- get.marginal.qtl(X, conf.3$R)
-qtl.4 <- get.marginal.qtl(X, conf.4$R)
+conf.1 <- estimate.confounder(Y1, Y0, X, clean.confounder = TRUE,
+                              out.tag = 'hs-fqtl', .factored = TRUE)
 
-x.perm <- X %r% sample(nrow(X))
+conf.2 <- estimate.lm(Y1, Y0, out.tag = 'hs-lm') 
 
-qtl.perm.0 <- get.marginal.qtl(x.perm, Y1)
-qtl.perm.1 <- get.marginal.qtl(x.perm, conf.1$R)
-qtl.perm.2 <- get.marginal.qtl(x.perm, conf.2$R)
-qtl.perm.3 <- get.marginal.qtl(x.perm, conf.3$R)
-qtl.perm.4 <- get.marginal.qtl(x.perm, conf.4$R)
+conf.3 <- estimate.lm(Y1, PC, out.tag = 'pc-lm') 
 
+conf.list <- list(conf.1, conf.2, conf.3)
+
+sapply(conf.list, function(cc) write.confounder(cc, out.hdr %&&% '-' %&&% cc$out.tag))
+
+qtl.0 <- get.marginal.qtl(X, Y1) %>% filter.qtl()
 write.tab.gz(qtl.0, out.hdr %&&% '.qtl-raw.gz')
-write.tab.gz(qtl.1, out.hdr %&&% '.qtl-y0-clean.gz')
-write.tab.gz(qtl.2, out.hdr %&&% '.qtl-y0.gz')
-write.tab.gz(qtl.3, out.hdr %&&% '.qtl-ctrl.gz')
-write.tab.gz(qtl.4, out.hdr %&&% '.qtl-pc.gz')
 
-write.tab.gz(qtl.perm.0, out.hdr %&&% '.qtl.perm-raw.gz')
-write.tab.gz(qtl.perm.1, out.hdr %&&% '.qtl.perm-y0-clean.gz')
-write.tab.gz(qtl.perm.2, out.hdr %&&% '.qtl.perm-y0.gz')
-write.tab.gz(qtl.perm.3, out.hdr %&&% '.qtl.perm-ctrl.gz')
-write.tab.gz(qtl.perm.4, out.hdr %&&% '.qtl.perm-pc.gz')
+sapply(conf.list, function(cc) {
+    write.tab.gz(get.marginal.qtl(X, cc$R) %>% filter.qtl(),
+                 out.hdr %&&% '.qtl-' %&&% cc$out.tag %&&% '.gz')
+})
+
+x.perm <- X %r% sample(nrow(X)) %>% as.matrix()
+sapply(conf.list, function(cc) {
+    write.tab.gz(get.marginal.qtl(x.perm, cc$R) %>% filter.qtl(),
+                 out.hdr %&&% '.perm-' %&&% cc$out.tag %&&% '.gz')
+})
+
+write.tab.gz(x.bim, out.hdr %&&% '.snps.gz')
+write.tab.gz(probes, out.hdr %&&% '.probes.gz')
 
 log.msg('Finished\n')

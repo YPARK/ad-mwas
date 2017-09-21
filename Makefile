@@ -80,7 +80,9 @@ data/meth/chr%-logit.ft: data/raw/chr%-probes.txt.gz data/raw/chr%-beta.txt.gz d
 
 ################################################################
 ## Generate QTL data in temporary directory
-step3: bin/plink jobs/qtl-data-jobs.txt.gz
+step3: bin/plink \
+  $(foreach chr, $(CHR), jobs/segments/$(chr)-jobs.txt) \
+  jobs/qtl-data-jobs.txt.gz
 
 clear-step3:
 	[ -f jobs/qtl-data-jobs.txt.gz ] && rm jobs/qtl-data-jobs.txt.gz
@@ -90,21 +92,24 @@ TEMPDIR := /broad/hptmp/ypp/AD/mwas/qtl/
 $(TEMPDIR):
 	[ -d $@ ] || mkdir -p $@
 
+jobs/segments/%-jobs.txt: data/probes/chr%-probes.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	./run.sh ./make.job.segments.R $< > $@
+
 ## Create methylation job lists
 jobs/qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-data-$(chr)-jobs.txt.gz)
 	cat $^ > $@
 	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -q short -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
-CHUNK := 30 # group every ~30 CpGs as one job
 NCTRL := 3   # 3 control CpGs for each CpG
 DATA_QTL := ./make.data.qtl.R
 GENO_HDR := ./rosmap-geno/gen/impute/rosmap1709-chr
 
 ## % = $(chr)
-jobs/temp-qtl-data-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz data/meth/chr%-logit.ft $(TEMPDIR)
+jobs/temp-qtl-data-%-jobs.txt.gz: jobs/segments/%-jobs.txt data/meth/chr%-logit.ft $(TEMPDIR)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "$(DATA_QTL)" FS "data/meth/chr$*-logit.ft" FS "data/raw/chr$*-probes.txt.gz" FS $$1 FS $(NCTRL) FS "$(GENO_HDR)$*" FS ("$(TEMPDIR)/$*/" NR "-data") }' | gzip > $@
+	cat $< | awk '{ print "$(DATA_QTL)" FS "data/meth/chr$*-logit.ft" FS "data/raw/chr$*-probes.txt.gz" FS $$1 FS $(NCTRL) FS "$(GENO_HDR)$*" FS ("$(TEMPDIR)/$*/" NR "-data") }' | gzip > $@
 
 ################################################################
 ## Confounder correction and QTL calling
@@ -118,13 +123,12 @@ jobs/qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-run-$(chr)-jobs.t
 	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.run -binding "linear:1" -q short -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
-jobs/temp-qtl-run-%-jobs.txt.gz: data/probes/chr%-probes.txt.gz
+jobs/temp-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	./make_job_segments.awk -vNTOT=$$(zcat $< | wc -l) -vCHUNK=$(CHUNK) | awk '{ print "./run.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS "data/geno/chr$*.samples.ft" FS "data/meth/control.ft" FS ("result/qtl/chr$*/b" NR) }' | gzip > $@
+	cat $< | awk '{ print "./make.summary.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS ("result/qtl/chr$*/b" NR) FS $$1 }' | gzip > $@
 
 ################################################################
 ## Utilities
-
 bin/plink:
 	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	curl $(PLINKZIP) -o bin/plink.zip
