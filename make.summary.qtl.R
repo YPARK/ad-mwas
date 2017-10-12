@@ -96,67 +96,6 @@ take.pve <- function(qtl.out, xx, cc) {
                vr = apply(resid, 2, var, na.rm = TRUE))
 }
 
-## 1. W = Y0 - X * theta
-## 2. Y1 = f(W + R)
-estimate.confounder <- function(yy, yy.ctrl,
-                                xx = NULL,
-                                clean.confounder = FALSE,
-                                out.tag = '',
-                                .pheno = pheno,
-                                .iterations = 5000,
-                                .factored = TRUE,
-                                .cpg.names = cpg.names) {
-
-    vb.opt <- list(vbiter = .iterations,
-                   gammax = 1e4,
-                   out.residual = TRUE,
-                   tol = 1e-8,
-                   rate = 0.01,
-                   decay = -0.01,
-                   model = 'gaussian',
-                   pi = -0,
-                   tau = -5,
-                   do.hyper = FALSE,
-                   nsample = 10,
-                   print.interv = 100,
-                   adam.rate.m = 0.5,
-                   adam.rate.v = 0.9)
-
-    if(clean.confounder) {
-        stopifnot(!is.null(xx))
-
-        out.W <- fqtl.regress(y = yy.ctrl, x.mean = xx, factored = FALSE, options = vb.opt)
-        W.proxy <- out.W$resid$theta
-        W.proxy[is.na(yy.ctrl)] <- NA
-        W.proxy <- scale(W.proxy)
-    } else {
-        W.proxy <- yy.ctrl %>% scale()
-    }
-
-    k <- max(min(ncol(yy) - 1, 5), 1)
-
-    vb.opt$k <- k
-    vb.opt$svd.init <- TRUE
-
-    ## Remove Y1 ~ W + .Pheno + 1
-    out.1 <- fqtl.regress(y = yy, x.mean = W.proxy, c.mean = .pheno, factored = .factored,
-                          options = vb.opt)
-
-    residual <- out.1$resid$theta
-    residual[is.na(yy)] <- NA
-    colnames(residual) <- .cpg.names
-    pve <- cbind(.cpg.names, take.pve(out.1, W.proxy, .pheno))
-
-    list(R = residual,
-         W = W.proxy,
-         PVE = pve,
-         mean.left = out.1$mean.left,
-         mean.right = out.1$mean.right,
-         mean = out.1$mean,
-         var = out.1$var,
-         out.tag = out.tag)
-}
-
 run.glmnet <- function(y, x, alpha = 1){
     valid <- !is.na(y)
     xx <- x[valid,,drop=FALSE]
@@ -212,30 +151,23 @@ filter.qtl <- function(qtl.tab, cis.dist = 1e6, .probes = probes, .snps = x.bim)
                     select(snp.loc, cg, beta, beta.z)
 }
 
+conf.1 <- estimate.lm(Y1, Y0, out.tag = 'hs-lm') 
 
-conf.1 <- estimate.confounder(Y1, Y0, X, clean.confounder = TRUE,
-                              out.tag = 'hs-fqtl', .factored = TRUE)
+conf.2 <- estimate.lm(Y1, PC, out.tag = 'pc-lm') 
 
-conf.2 <- estimate.lm(Y1, Y0, out.tag = 'hs-lm') 
-
-conf.3 <- estimate.lm(Y1, PC, out.tag = 'pc-lm') 
-
-conf.list <- list(conf.1, conf.2, conf.3)
+conf.list <- list(conf.1, conf.2)
 
 sapply(conf.list, function(cc) write.confounder(cc, out.hdr %&&% '-' %&&% cc$out.tag))
 
-qtl.0 <- get.marginal.qtl(X, Y1) %>% filter.qtl()
-write.tab.gz(qtl.0, out.hdr %&&% '.qtl-raw.gz')
+qtl.y1 <- get.marginal.qtl(X, Y1) %>% filter.qtl()
+write.tab.gz(qtl.y1, out.hdr %&&% '.qtl-raw-y1.gz')
+
+qtl.y0 <- get.marginal.qtl(X, Y0) %>% filter.qtl()
+write.tab.gz(qtl.y0, out.hdr %&&% '.qtl-raw-y0.gz')
 
 sapply(conf.list, function(cc) {
     write.tab.gz(get.marginal.qtl(X, cc$R) %>% filter.qtl(),
                  out.hdr %&&% '.qtl-' %&&% cc$out.tag %&&% '.gz')
-})
-
-x.perm <- X %r% sample(nrow(X)) %>% as.matrix()
-sapply(conf.list, function(cc) {
-    write.tab.gz(get.marginal.qtl(x.perm, cc$R) %>% filter.qtl(),
-                 out.hdr %&&% '.perm-' %&&% cc$out.tag %&&% '.gz')
 })
 
 write.tab.gz(x.bim, out.hdr %&&% '.snps.gz')

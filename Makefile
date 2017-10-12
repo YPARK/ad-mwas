@@ -125,7 +125,7 @@ jobs/qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-run-$(chr)-jobs.t
 
 jobs/temp-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	cat $< | awk '{ print "./make.summary.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS ("result/qtl/chr$*/b" NR) FS $$1 }' | gzip > $@
+	cat $< | awk '{ print "./make.summary.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS ("result/qtl/$*/b" NR) FS $$1 }' | gzip > $@
 
 ################################################################
 ## Utilities
