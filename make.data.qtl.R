@@ -11,9 +11,14 @@ meth.probe.file <- argv[2]               # e.g., meth.probe.file = 'data/raw/chr
 meth.cols <- eval(parse(text = argv[3])) # e.g., meth.cols = 1:20
 n.top.y0 <- as.integer(argv[4])          # e.g., n.top.y0 = 3
 plink.hdr <- argv[5]                     # e.g., plink.hdr = 'rosmap-geno/gen/impute/rosmap1709-chr2'
-out.hdr <- argv[6]                       # e.g., out.hdr = 'temp'
 
-cis.dist <- 1e6
+if(length(argv) > 6) {
+    cis.dist <- as.numeric(argv[6])
+    out.hdr <- argv[7]                       # e.g., out.hdr = 'temp'
+} else {
+    out.hdr <- argv[6]                       # e.g., out.hdr = 'temp'
+    cis.dist <- 1e6
+}
 
 library(fqtl)
 library(feather)

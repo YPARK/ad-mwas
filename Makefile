@@ -128,6 +128,40 @@ jobs/temp-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
 	cat $< | awk '{ print "./make.summary.qtl.R" FS ("$(TEMPDIR)/$*/" NR "-data") FS ("result/qtl/$*/b" NR) FS $$1 }' | gzip > $@
 
 ################################################################
+## Hi-C guided QTL calling
+step5: jobs/hic-qtl-data-jobs.txt.gz
+
+TEMPDIR-HIC := /broad/hptmp/ypp/AD/mwas/hic-qtl/
+
+jobs/hic-qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-hic-qtl-data-$(chr)-jobs.txt.gz)
+	cat $^ > $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N hic-qtl.data -binding "linear:1" -l h_rt=1800 -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	rm $^
+
+## % = $(chr)
+jobs/temp-hic-qtl-data-%-jobs.txt.gz: jobs/segments/%-jobs.txt data/meth/chr%-logit.ft $(TEMPDIR-HIC)
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	cat $< | awk '{ print "$(DATA_QTL)" FS "data/meth/chr$*-logit.ft" FS "data/raw/chr$*-probes.txt.gz" FS $$1 FS $(NCTRL) FS "$(GENO_HDR)$*" FS 3e6 FS ("$(TEMPDIR-HIC)/$*/" NR "-data") }' | gzip > $@
+
+$(TEMPDIR-HIC):
+	[ -d $@ ] || mkdir -p $@
+
+################################################################
+step6: jobs/hic-qtl-run-jobs.txt.gz
+
+jobs/hic-qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-hic-qtl-run-$(chr)-jobs.txt.gz)
+	cat $^ > $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N hic-qtl.run -binding "linear:1" -l h_rt=1:00:00 -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	rm $^
+
+jobs/temp-hic-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	printf "" | gzip >> $@
+	cat $< | awk '{ print "./make.summary.hic-qtl.R" FS ("$(TEMPDIR-HIC)/$*/data-" NR) FS "hic/CO/chr$*.pairs.gz" FS ("result/hic-qtl/CO/$*/b" NR) }' | gzip >> $@
+	cat $< | awk '{ print "./make.summary.hic-qtl.R" FS ("$(TEMPDIR-HIC)/$*/data-" NR) FS "hic/HC/chr$*.pairs.gz" FS ("result/hic-qtl/HC/$*/b" NR) }' | gzip >> $@
+
+
+################################################################
 ## Utilities
 bin/plink:
 	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
