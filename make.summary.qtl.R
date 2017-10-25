@@ -49,9 +49,10 @@ library(methods)
 
 Y1 <- .read.mat(y1.data.file)
 Y0 <- .read.mat(y0.data.file)
-X <- .read.mat(x.data.file)
 x.bim <- .read.tab(x.bim.data.file)
 colnames(x.bim) <- c('chr', 'rs', '.', 'snp.loc', 'qtl.a1', 'qtl.a2')
+X <- .read.mat(x.data.file) %>% scale()
+colnames(X) <- x.bim[, 4]
 
 probes <- .read.tab(probe.data.file) %>% select(-cg.pos)
 cpg.names <- probes$cg
@@ -143,12 +144,11 @@ write.tab.gz <- function(.tab, .out.file) {
     write.tab(.tab, file = gzfile(.out.file))
 }
 
-filter.qtl <- function(qtl.tab, cis.dist = 1e6, .probes = probes, .snps = x.bim) {
-    qtl.tab %>% mutate(cg = as.character(cg), rs = as.character(rs)) %>%
+filter.qtl <- function(qtl.tab, cis.dist = 1e6, .probes = probes) {
+    qtl.tab %>% mutate(cg = as.character(cg)) %>%
         left_join(.probes, by = 'cg') %>%
-            left_join(.snps, by = 'rs') %>%
-                filter(abs(snp.loc - loc) < cis.dist) %>%
-                    select(snp.loc, cg, beta, beta.z)
+            filter(abs(snp - loc) < cis.dist) %>%
+                select(snp, cg, beta, beta.z)
 }
 
 conf.1 <- estimate.lm(Y1, Y0, out.tag = 'hs-lm') 

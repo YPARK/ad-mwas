@@ -40,9 +40,9 @@ get.marginal.qtl <- function(xx, yy) {
     beta <- fast.cov(.xx, .yy) %>% as.matrix() %>% melt()
     beta.z <- fast.z.cov(.xx, .yy) %>% as.matrix() %>% melt()
 
-    colnames(beta) <- c('rs', 'cg', 'beta')
-    colnames(beta.z) <- c('rs', 'cg', 'beta.z')
-    out <- beta %>% left_join(beta.z, by = c('rs', 'cg')) %>%
+    colnames(beta) <- c('snp', 'cg', 'beta')
+    colnames(beta.z) <- c('snp', 'cg', 'beta.z')
+    out <- beta %>% left_join(beta.z, by = c('snp', 'cg')) %>%
         as.data.frame()
     return(out)
 }

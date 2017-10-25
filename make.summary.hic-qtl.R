@@ -63,9 +63,11 @@ hic.pairs <- c(.pairs1$pp, .pairs2$pp)
 
 Y1 <- .read.mat(y1.data.file)
 Y0 <- .read.mat(y0.data.file)
-X <- .read.mat(x.data.file)
+
 x.bim <- .read.tab(x.bim.data.file)
 colnames(x.bim) <- c('chr', 'rs', '.', 'snp.loc', 'qtl.a1', 'qtl.a2')
+X <- .read.mat(x.data.file) %>% scale()
+colnames(X) <- x.bim[, 4]
 
 probes <- .read.tab(probe.data.file) %>% select(-cg.pos)
 cpg.names <- probes$cg
@@ -111,11 +113,12 @@ run.glmnet <- function(y, x, alpha = 1){
     yy <- as.matrix(y[valid])
     cv.out <- cv.glmnet(x=xx, y=yy, alpha=alpha, nfolds=5)
     bet <- glmnet(x=xx, y=yy, alpha=alpha, lambda=cv.out$lambda.min)$beta
+    bet <- as.matrix(bet)
 
     cat(mean(abs(bet) > 0), '\n')
 
     if(sum(abs(bet) > 0) == 0) {
-        return(list(beta = NULL, resid = y))
+        return(list(beta = bet, resid = y))
     }
 
     ## re-estimate lm on non-zero coefficients
@@ -162,42 +165,30 @@ write.tab.gz <- function(.tab, .out.file) {
 ## Hi-C based filtering
 hic.filter.qtl <- function(qtl.tab,
                            probes.tab = probes,
-                           snps.tab = x.bim,
                            hic.pairs.tab = hic.pairs,
                            resol = hic.resol) {
 
     ret <- qtl.tab %>%
-        mutate(cg = as.character(cg), rs = as.character(rs)) %>%
+        mutate(cg = as.character(cg)) %>%
             left_join(probes.tab, by = 'cg') %>%
-                left_join(snps.tab, by = 'rs') %>%
-                    mutate(u = ceiling(loc/resol), v = ceiling(snp.loc/resol))
+                mutate(u = ceiling(loc/resol), v = ceiling(snp/resol))
     
     ret.self <- ret %>% filter(u == v) %>%
-        select(snp.loc, cg, beta, beta.z)
+        select(snp, cg, beta, beta.z)
 
     ret.remote <- ret %>%        
         mutate(pp = paste(u, v, sep = '-')) %>%
             filter(pp %in% hic.pairs.tab)
     
-    ret.remote <- ret.remote %>%  select(snp.loc, cg, beta, beta.z)
+    ret.remote <- ret.remote %>%  select(snp, cg, beta, beta.z)
 
     ret <- rbind(ret.self, ret.remote) %>% arrange(snp, desc(abs(beta.z)))
 
     return(ret %>% as.data.frame())
 }
 
-filter.qtl <- function(qtl.tab, cis.dist = 1e6, .probes = probes, .snps = x.bim) {
-    qtl.tab %>% mutate(cg = as.character(cg), rs = as.character(rs)) %>%
-        left_join(.probes, by = 'cg') %>%
-            left_join(.snps, by = 'rs') %>%
-                filter(abs(snp.loc - loc) < cis.dist) %>%
-                    select(snp.loc, cg, beta, beta.z)
-}
-
-conf.1 <- estimate.lm(Y1, Y0, out.tag = 'hs-lm') 
-
-conf.2 <- estimate.lm(Y1, PC, out.tag = 'pc-lm') 
-
+conf.1 <- estimate.lm(Y1, Y0, out.tag = 'hs-lm', cpg.names) 
+conf.2 <- estimate.lm(Y1, PC, out.tag = 'pc-lm', cpg.names) 
 conf.list <- list(conf.1, conf.2)
 
 sapply(conf.list, function(cc) write.confounder(cc, out.hdr %&&% '-' %&&% cc$out.tag))
