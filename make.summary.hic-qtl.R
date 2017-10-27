@@ -15,6 +15,11 @@ hic.resol <- 40000
 ################################################################
 source('util.R')
 
+if(file.exists(out.hdr %&&% '.probes.gz')) {
+    log.msg('output files exist\n')
+    q()
+}
+
 y1.data.file <- data.hdr %&&% '.y1.ft'
 y0.data.file <- data.hdr %&&% '.y0.ft'
 x.data.file <- data.hdr %&&% '.x.ft'
@@ -35,7 +40,7 @@ in.files <- c(y1.data.file,
               PC.file)
 
 if(!all(sapply(in.files, file.exists))) {
-    log.msg('Insufficient input files:\n%s\n',
+    log.msg('Incomplete input files:\n%s\n',
             paste(in.files, collapse='\n'))
     q()
 }
@@ -195,14 +200,13 @@ sapply(conf.list, function(cc) write.confounder(cc, out.hdr %&&% '-' %&&% cc$out
 
 qtl.y1 <- get.marginal.qtl(X, Y1) %>% hic.filter.qtl()
 write.tab.gz(qtl.y1, out.hdr %&&% '.qtl-raw-y1.gz')
-
-qtl.y0 <- get.marginal.qtl(X, Y0)
-write.tab.gz(qtl.y0, out.hdr %&&% '.qtl-raw-y0.gz')
+gc()
 
 sapply(conf.list, function(cc) {
     write.tab.gz(get.marginal.qtl(X, cc$R) %>% hic.filter.qtl(),
                  out.hdr %&&% '.qtl-' %&&% cc$out.tag %&&% '.gz')
 })
+gc()
 
 write.tab.gz(x.bim, out.hdr %&&% '.snps.gz')
 write.tab.gz(probes, out.hdr %&&% '.probes.gz')

@@ -162,9 +162,6 @@ sapply(conf.list, function(cc) write.confounder(cc, out.hdr %&&% '-' %&&% cc$out
 qtl.y1 <- get.marginal.qtl(X, Y1) %>% filter.qtl()
 write.tab.gz(qtl.y1, out.hdr %&&% '.qtl-raw-y1.gz')
 
-qtl.y0 <- get.marginal.qtl(X, Y0) %>% filter.qtl()
-write.tab.gz(qtl.y0, out.hdr %&&% '.qtl-raw-y0.gz')
-
 sapply(conf.list, function(cc) {
     write.tab.gz(get.marginal.qtl(X, cc$R) %>% filter.qtl(),
                  out.hdr %&&% '.qtl-' %&&% cc$out.tag %&&% '.gz')

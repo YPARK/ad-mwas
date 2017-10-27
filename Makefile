@@ -98,7 +98,7 @@ jobs/segments/%-jobs.txt: data/probes/chr%-probes.txt.gz
 
 ## Create methylation job lists
 jobs/qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-data-$(chr)-jobs.txt.gz)
-	cat $^ > $@
+	zcat $^ | awk 'system("[ ! -f " $$NF ".x.ft ]") == 0' | gzip > $@
 	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.data -binding "linear:1" -l h_rt=1800 -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
@@ -120,7 +120,7 @@ clear-step4:
 
 jobs/qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-qtl-run-$(chr)-jobs.txt.gz)
 	cat $^ > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.run -binding "linear:1" -l h_rt=1800 -l h_vmem=4g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N qtl.run -binding "linear:1" -l h_rt=1000 -l h_vmem=8g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
 jobs/temp-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
@@ -135,7 +135,7 @@ TEMPDIR-HIC := /broad/hptmp/ypp/AD/mwas/hic-qtl/
 
 jobs/hic-qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-hic-qtl-data-$(chr)-jobs.txt.gz)
 	cat $^ > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N hic-qtl.data -binding "linear:1" -l h_rt=1800 -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N hic-qtl.data -binding "linear:1" -l h_rt=1800 -l h_vmem=16g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
 ## % = $(chr)
@@ -149,11 +149,11 @@ $(TEMPDIR-HIC):
 ################################################################
 step6: jobs/hic-qtl-run-jobs.txt.gz
 
-step6-long: jobs/hic-qtl-run-jobs-long.txt.gz
+step6-resubmit: jobs/hic-qtl-run-jobs-resubmit.txt.gz
 
 jobs/hic-qtl-run-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-hic-qtl-run-$(chr)-jobs.txt.gz)
 	cat $^ > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N MWAS.hic-qtl.run -binding "linear:1" -l h_rt=1800 -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N MWAS.hic-qtl.run -binding "linear:1" -l h_rt=1800 -l h_vmem=16g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 	rm $^
 
 jobs/temp-hic-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
@@ -162,10 +162,19 @@ jobs/temp-hic-qtl-run-%-jobs.txt.gz: jobs/segments/%-jobs.txt
 	cat $< | awk '{ print "./make.summary.hic-qtl.R" FS ("$(TEMPDIR-HIC)/$*/" NR "-data") FS "hic/CO/chr$*.pairs.gz" FS ("result/hic-qtl/CO/$*/b" NR) }' | gzip >> $@
 	cat $< | awk '{ print "./make.summary.hic-qtl.R" FS ("$(TEMPDIR-HIC)/$*/" NR "-data") FS "hic/HC/chr$*.pairs.gz" FS ("result/hic-qtl/HC/$*/b" NR) }' | gzip >> $@
 
-jobs/hic-qtl-run-jobs-long.txt.gz:
+jobs/hic-qtl-run-jobs-resubmit.txt.gz:
 	zcat jobs/hic-qtl-run-jobs.txt.gz | awk 'system("[ ! -f " $$NF ".probes.gz ]") == 0' | gzip > $@
-	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N TWAS.hic-qtl -binding "linear:1" -l h_rt=12:00:00 -l h_vmem=6g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N MWAS.hic-qtl -binding "linear:1" -l h_rt=1:00:00 -l h_vmem=16g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
 
+
+## recall data generation for those missing spots
+jobs/hic-qtl-data-recall.txt.gz: jobs/temp-hic-qtl-data-jobs.txt.gz
+	zcat $< | awk '{ split($$2,yy,"/"); yyfile = yy[length(yy)]; gsub("-logit.ft","",yyfile); gsub("chr","",yyfile); chr=yyfile; split($$NF, out, "/"); data = out[length(out)]; gsub("-data", "", data); co_probe_file = "result/hic-qtl/CO/" chr "/b" data ".probes.gz"; hc_probe_file = "result/hic-qtl/HC/" chr "/b" data ".probes.gz"; if(system("[ ! -f " hc_probe_file " ]") == 0 || system("[ ! -f " co_probe_file " ]") == 0) print }' | awk 'system("[ ! -f " $$NF ".x.ft ]") == 0' | gzip > $@
+	@[ $$(zcat $@ | wc -l) -lt 1 ] || qsub -t 1-$$(zcat $@ | wc -l) -N hic-qtl.data -binding "linear:1" -l h_rt=1800 -l h_vmem=16g -P compbio_lab -V -cwd -o /dev/null -b y -j y ./run_rscript.sh $@
+
+jobs/temp-hic-qtl-data-jobs.txt.gz: $(foreach chr, $(CHR), jobs/temp-hic-qtl-data-$(chr)-jobs.txt.gz)
+	cat $^ > $@
+	rm $^
 
 ################################################################
 ## Utilities
